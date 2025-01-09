@@ -1,40 +1,61 @@
 package lime1st.limeApp.jwt.application;
 
 import io.jsonwebtoken.ExpiredJwtException;
+import lime1st.limeApp.common.exception.InvalidException;
+import lime1st.limeApp.common.exception.NotFoundException;
 import lime1st.limeApp.jwt.dto.JwtClaims;
 import lime1st.limeApp.jwt.dto.JwtToken;
+import lime1st.limeApp.member.application.MemberService;
 import lime1st.limeApp.member.application.MemberServiceDTO;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
 
 import java.util.Map;
 
+@Slf4j
+@Service
+@RequiredArgsConstructor
 public class TokenService {
 
-    public refresh() {
+    private final TokenProvider tokenProvider;
+    private final MemberService memberService;
+    private final PasswordEncoder passwordEncoder;
+
+    public JwtToken request(String email, String password) {
+        MemberServiceDTO dto = memberService.findByEmail(email);
+
+        JwtClaims claims = new JwtClaims(dto.memberId(), dto.email(), dto.username(), dto.role());
+
+        //  password 검증
+        if (!passwordEncoder.matches(password, dto.password())) {
+            //  패스워드 검증 후 패스워드 오류 보다 그냥 일반 오류를 리턴하는 것이 보안 상 낫다.
+            throw new NotFoundException();
+        }
+
+        return tokenProvider.requestToken(claims);
+    }
+
+    public JwtToken refresh(String accessToken, String refreshToken, String memberId) {
         try {
             //  Access Token 만료 확인(refresh 요청이므로 만료된 것이 정상)
             tokenProvider.validateToken(accessToken);
             log.info("만료 안됨: 기존 토큰 리턴");
             // 예외가 발생하지 않으면 accessToken 의 기한이 만료되지 않은 것 -> 그냥 전달
-            return ResponseEntity.ok(new JwtToken(accessToken, refreshToken));
+            return new JwtToken(accessToken, refreshToken);
         } catch (ExpiredJwtException expired) {
             //  accessToken 만료로 refresh 필요
             log.info("accessToken 만료, refresh 확인: 새로운 토큰 리턴");
             try {
-                return ResponseEntity.ok(makeNewToken(memberId, refreshToken));
+                return makeNewToken(memberId, refreshToken);
             } catch (Exception e) {
                 // refresh 만료
-                return handleException("REFRESH" + e.getMessage());
+                throw new InvalidException("Invalid Token");
             }
         } catch (Exception e) {
-            return handleException(e.getMessage());
+            throw new InvalidException("Invalid Token");
         }
-    }
-
-    //  토큰 관련 예외 처리는 컨트롤러에서 별도로 처리
-    private ResponseEntity<?> handleException(String msg) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(msg); // 400
     }
 
     //  새로운 Access Token, Refresh Token 생성
@@ -45,7 +66,7 @@ public class TokenService {
 
         //  Refresh Token 에서 mid 값 추출
         if (!memberId.equals(claims.get("memberId").toString())) {
-            handleException("Invalid Refresh Token Host");
+            throw new InvalidException("Invalid Token");
         }
 
         //  mid 를 이용해서 사용자 정보를 다시 확인한 후에 새로운 토큰 생성

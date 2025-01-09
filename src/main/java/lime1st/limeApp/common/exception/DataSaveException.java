@@ -3,10 +3,10 @@ package lime1st.limeApp.common.exception;
 public class DataSaveException extends RuntimeException {
 
     public DataSaveException() {
-        super("Data Error");
+        super("Data");
     }
 
     public DataSaveException(String message) {
-        super("Data " + message + " Error");
+        super("Data " + message);
     }
 }
